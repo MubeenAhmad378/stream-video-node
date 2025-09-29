@@ -4,6 +4,8 @@ import { User } from "../models/user.model.js";
 import { uploadONCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import { Subscription } from "../models/subscriptions.model.js";
+import mongoose from "mongoose";
 
 
 const generateAccessAndRefreshTokens = async(userId)=>{
@@ -346,6 +348,201 @@ const updateUserCoverImage = asyncHandler(async(req,res)=>{
 })
 
 
+// through aggregation pipeline 
+// const getUserChannelProfile = asyncHandler(async(req,res)=>{
+//   const {username} = req.params 
+ 
+//   if (!username?.trim()) {
+//     throw new ApiError(400, "Username is required");
+//   }
+  
+// const channel = await User.aggregate([
+//    {
+//       $match:{
+//          username : username?.toLowerCase()
+//       }
+//    },
+
+//       // All people who subscribed to THIS channel
+//     {
+//       $lookup: {
+//         from: "subscriptions",
+//         localField: "_id",
+//         foreignField: "channel",
+//         as: "subscribers",
+//       },
+//     },
+
+//     // All channels THIS user has subscribed to
+//     {
+//       $lookup: {
+//         from: "subscriptions",
+//         localField: "_id",
+//         foreignField: "subscriber",
+//         as: "subscribedTo",
+//       },
+//     },
+
+//     {
+//       $addFields: {
+//         subscribersCount: { $size: "$subscribers" },
+//         channelssubscribedToCount: { $size: "$subscribedTo" },
+//         isSubscribed :{
+//             $cond :{
+//               if: { $in: [new mongoose.Types.ObjectId(req.user?._id), "$subscribers.subscriber"] },
+//                 then : true,
+//                 else : false
+//             }
+//         }
+//       }
+//     },
+//         {
+//       $project: {
+//         fullName: 1,
+//         username: 1,
+//         subscribersCount: 1,
+//         channelssubscribedToCount: 1,
+//         isSubscribed: 1,
+//         email: 1,
+//         avatar: 1,
+//         coverImage: 1
+//       },
+//     },
+
+// ])
+
+//  if (!channel?.length) {
+//     throw new ApiError(404, "Channel not found");
+//   }
+
+//   return res
+//     .status(200)
+//     .json(
+//       new ApiResponse(200, channel[0], "Channel profile fetched successfully")
+//     );
+
+// })
+
+
+
+
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+  const { username } = req.params;
+
+  // username required check
+  if (!username?.trim()) {
+    throw new ApiError(400, "Username is required");
+  }
+
+  // Step 1: Find user by username
+  const channel = await User.findOne({ username: username.toLowerCase() }).select(
+    "fullName username email avatar coverImage"
+  );
+
+  if (!channel) {
+    throw new ApiError(404, "Channel not found");
+  }
+
+  // Step 2: Count subscribers of this channel
+  const subscribersCount = await Subscription.countDocuments({
+    channel: channel._id,
+  });
+
+  // Step 3: Count channels this user has subscribed to
+  const channelssubscribedToCount = await Subscription.countDocuments({
+    subscriber: channel._id,
+  });
+
+  // Step 4: Check if current user is subscribed to this channel
+  let isSubscribed = false;
+  if (req.user?._id) {
+    const subscription = await Subscription.findOne({
+      subscriber: new mongoose.Types.ObjectId(req.user._id),
+      channel: channel._id,
+    });
+    isSubscribed = !!subscription; // true if subscription exists, else false
+  }
+
+  // Step 5: Send response
+  return res.status(200).json(
+    new ApiResponse(200, {
+      fullName: channel.fullName,
+      username: channel.username,
+      email: channel.email,
+      avatar: channel.avatar,
+      coverImage: channel.coverImage,
+      subscribersCount,
+      channelssubscribedToCount,
+      isSubscribed,
+    }, "Channel profile fetched successfully")
+  );
+});
+
+
+
+
+
+const getWatchHistory = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+
+  if (!userId) {
+    throw new ApiError(401, "Unauthorized access");
+  }
+
+  const user = await User.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(userId)
+      }
+    },
+    {
+      $lookup: {
+        from: "videos", // name of your videos collection
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+        pipeline: [
+          {
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
+                {
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1
+                  }
+                }
+              ]
+            }
+          },
+          {
+            $addFields: {
+              owner: { $first: "$owner" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      $project: {
+        watchHistory: 1
+      }
+    }
+  ]);
+
+  if (!user.length) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, user[0].watchHistory, "Watch history fetched successfully"));
+});
+
 
 
 export {
@@ -357,7 +554,9 @@ export {
     getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
-    updateUserCoverImage
+    updateUserCoverImage,
+    getUserChannelProfile,
+    getWatchHistory
 }
 
 
