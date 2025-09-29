@@ -6,6 +6,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 import { Subscription } from "../models/subscriptions.model.js";
 import mongoose from "mongoose";
+import { Video } from "../models/video.model.js";
 
 
 const generateAccessAndRefreshTokens = async(userId)=>{
@@ -482,66 +483,49 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
 
 
+// Watch History aur Video fetch 
 const getWatchHistory = asyncHandler(async (req, res) => {
   const userId = req.user?._id;
+  const { videoId } = req.params; // frontend se video ka ID milega
 
   if (!userId) {
     throw new ApiError(401, "Unauthorized access");
   }
 
-  const user = await User.aggregate([
-    {
-      $match: {
-        _id: new mongoose.Types.ObjectId(userId)
-      }
-    },
-    {
-      $lookup: {
-        from: "videos", // name of your videos collection
-        localField: "watchHistory",
-        foreignField: "_id",
-        as: "watchHistory",
-        pipeline: [
-          {
-            $lookup: {
-              from: "users",
-              localField: "owner",
-              foreignField: "_id",
-              as: "owner",
-              pipeline: [
-                {
-                  $project: {
-                    fullName: 1,
-                    username: 1,
-                    avatar: 1
-                  }
-                }
-              ]
-            }
-          },
-          {
-            $addFields: {
-              owner: { $first: "$owner" }
-            }
-          }
-        ]
-      }
-    },
-    {
-      $project: {
-        watchHistory: 1
-      }
-    }
-  ]);
-
-  if (!user.length) {
-    throw new ApiError(404, "User not found");
+  // 1. Video find karo
+  const video = await Video.findById(videoId);
+  if (!video) {
+    throw new ApiError(404, "Video not found");
   }
+
+  // 2. Video ka views badhao
+  video.views += 1;
+  await video.save();
+
+  // 3. User ki watchHistory me video ka ID add karo
+  await User.findByIdAndUpdate(
+    userId,
+    { $addToSet: { watchHistory: new mongoose.Types.ObjectId(videoId) } },
+    { new: true }
+  );
+
+  // 4. Ab user ka watchHistory data fetch karo
+  const user = await User.findById(userId)
+    .populate({
+      path: "watchHistory",
+      populate: {
+        path: "owner",
+        model: "User",
+        select: "fullName username avatar"
+      }
+    })
+    .select("watchHistory");
 
   return res
     .status(200)
-    .json(new ApiResponse(200, user[0].watchHistory, "Watch history fetched successfully"));
+    .json(new ApiResponse(200, user.watchHistory, "Watch history fetched successfully"));
 });
+
 
 
 
