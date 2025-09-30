@@ -13,7 +13,8 @@ const playlistSchema = new mongoose.Schema({
     ref: "Video"
      }],
     owner: {
-    type: mongoose.Schema.Types.ObjectId, ref: "User", 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "User", 
     required: true 
     }
 }, { timestamps: true });
